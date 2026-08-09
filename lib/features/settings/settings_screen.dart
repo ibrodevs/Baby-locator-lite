@@ -3,20 +3,19 @@ import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:kid_security/l10n/app_localizations.dart';
-import 'package:kid_security/l10n/app_localizations_extras.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:kid_security/l10n/app_localizations.dart';
+import 'package:kid_security/l10n/app_localizations_extras.dart';
 
 import '../../core/compliance/app_compliance.dart';
 import '../../core/providers/locale_provider.dart';
 import '../../core/providers/session_providers.dart';
 import '../../core/services/device_notification_service.dart';
 import '../../core/services/local_avatar_store.dart';
-import '../../core/subscriptions/subscription_service.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/widgets/app_language_sheet.dart';
 import '../../core/widgets/app_feedback.dart';
+import '../../core/widgets/app_language_sheet.dart';
 import '../../core/widgets/brand_header.dart';
 import '../auth/onboarding_screen.dart';
 import '../parent/children_list_screen.dart';
@@ -24,6 +23,7 @@ import 'parent_child_permissions_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
+
   @override
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -55,22 +55,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (kIsWeb) return;
     final user = ref.read(sessionProvider).user;
     if (user == null) return;
+
     final picker = ImagePicker();
     final xFile =
         await picker.pickImage(source: ImageSource.gallery, maxWidth: 512);
     if (xFile == null) return;
+
     try {
       final path = await LocalAvatarStore.instance
           .saveUserAvatar(user.id, File(xFile.path));
       if (!mounted) return;
       ref.read(sessionProvider.notifier).updateAvatar(path);
-    } catch (e) {
-      if (mounted) {
-        final t = S.of(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(t.failedToUploadAvatar(e.toString()))),
-        );
-      }
+    } catch (error) {
+      if (!mounted) return;
+      final t = S.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.failedToUploadAvatar(error.toString()))),
+      );
     }
   }
 
@@ -90,14 +91,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final granted =
           await DeviceNotificationService.instance.ensurePermissions();
       if (!granted) {
-        if (mounted) {
-          final t = S.of(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(t.notificationPermissionRequired),
-            ),
-          );
-        }
+        if (!mounted) return;
+        final t = S.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t.notificationPermissionRequired)),
+        );
         return;
       }
     }
@@ -126,6 +124,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       cascadesChildren: true,
     );
     if (!confirmed || !mounted) return;
+
     try {
       await ref.read(sessionProvider.notifier).deleteAccount();
       if (!mounted) return;
@@ -143,66 +142,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _openCustomerCenter() async {
-    try {
-      await ref.read(subscriptionServiceProvider.notifier).openCustomerCenter();
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        'Subscription settings opened.',
-        type: AppFeedbackType.success,
-      );
-    } catch (error) {
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        error.toString(),
-        type: AppFeedbackType.error,
-      );
-    }
-  }
-
-  Future<void> _restorePurchases() async {
-    try {
-      final info = await ref
-          .read(subscriptionServiceProvider.notifier)
-          .restorePurchases();
-      if (!mounted) return;
-      if (info != null && isPremiumUser(info)) {
-        showAppSnackBar(
-          context,
-          'Your Family Security Pro access has been restored.',
-          type: AppFeedbackType.success,
-        );
-        return;
-      }
-      showAppSnackBar(
-        context,
-        'No active Family Security Pro entitlement was found.',
-        type: AppFeedbackType.warning,
-      );
-    } catch (error) {
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        error.toString(),
-        type: AppFeedbackType.error,
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = S.of(context);
     final selectedLocale = ref.watch(appLocaleProvider);
     final session = ref.watch(sessionProvider);
-    final subscription = ref.watch(subscriptionServiceProvider);
     final user = session.user;
     final selectedLanguageLabel = selectedLocale == null
         ? t.systemDefault
         : languageOptionFor(selectedLocale)?.nativeName ??
             selectedLocale.languageCode.toUpperCase();
-    final planLabel = subscription.isPremium ? t.proActive : t.freePlan;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -210,8 +159,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new,
-              color: AppColors.textPrimaryLight),
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: AppColors.textPrimaryLight,
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -227,7 +178,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         children: [
-          // Profile card
           AppCard(
             child: Column(
               children: [
@@ -250,8 +200,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           color: AppColors.primary,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.camera_alt,
-                            color: Colors.white, size: 16),
+                        child: const Icon(
+                          Icons.camera_alt,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                       ),
                     ],
                   ),
@@ -285,10 +238,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // Account section
           _SectionTitle(title: t.account),
           const SizedBox(height: 8),
           AppCard(
@@ -301,12 +251,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   title: t.manageChildrenMenu,
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                        builder: (_) => const ChildrenListScreen()),
+                      builder: (_) => const ChildrenListScreen(),
+                    ),
                   ),
                 ),
                 if (user?.role == UserRole.parent) ...[
                   const Divider(
-                      height: 1, indent: 56, color: AppColors.dividerLight),
+                    height: 1,
+                    indent: 56,
+                    color: AppColors.dividerLight,
+                  ),
                   _SettingsRow(
                     icon: Icons.verified_user_outlined,
                     iconColor: AppColors.success,
@@ -317,33 +271,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
-                  const Divider(
-                      height: 1, indent: 56, color: AppColors.dividerLight),
-                  _SettingsRow(
-                    icon: Icons.workspace_premium_outlined,
-                    iconColor: subscription.isPremium
-                        ? AppColors.warning
-                        : AppColors.primary,
-                    title: t.manageSubscription,
-                    trailingText: planLabel,
-                    onTap: _openCustomerCenter,
-                  ),
-                  const Divider(
-                      height: 1, indent: 56, color: AppColors.dividerLight),
-                  _SettingsRow(
-                    icon: Icons.restore_rounded,
-                    iconColor: AppColors.success,
-                    title: t.restorePurchases,
-                    onTap: _restorePurchases,
-                  ),
                 ],
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // Notifications section
           _SectionTitle(title: t.notifications),
           const SizedBox(height: 8),
           AppCard(
@@ -356,14 +288,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   title: t.pushNotifications,
                   value: _notificationsEnabled,
                   onChanged: (value) => _applyNotificationSettings(
-                    _currentNotificationSettings.copyWith(
-                      pushEnabled: value,
-                    ),
+                    _currentNotificationSettings.copyWith(pushEnabled: value),
                     requestPermission: value,
                   ),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsSwitchRow(
                   icon: Icons.location_on_outlined,
                   iconColor: AppColors.success,
@@ -376,7 +309,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsSwitchRow(
                   icon: Icons.battery_alert_outlined,
                   iconColor: AppColors.danger,
@@ -389,7 +325,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsSwitchRow(
                   icon: Icons.shield_outlined,
                   iconColor: AppColors.primary,
@@ -404,10 +343,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 20),
-
-          // General section
           _SectionTitle(title: t.general),
           const SizedBox(height: 8),
           AppCard(
@@ -422,7 +358,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onTap: _selectLanguage,
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsRow(
                   icon: Icons.help_outline,
                   iconColor: AppColors.textSecondaryLight,
@@ -430,7 +369,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onTap: () => AppCompliance.contactSupport(),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsRow(
                   icon: Icons.info_outline,
                   iconColor: AppColors.textSecondaryLight,
@@ -438,7 +380,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onTap: () => AppCompliance.showAboutSheet(context),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsRow(
                   icon: Icons.privacy_tip_outlined,
                   iconColor: AppColors.textSecondaryLight,
@@ -446,7 +391,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   onTap: () => AppCompliance.openPrivacyPolicy(),
                 ),
                 const Divider(
-                    height: 1, indent: 56, color: AppColors.dividerLight),
+                  height: 1,
+                  indent: 56,
+                  color: AppColors.dividerLight,
+                ),
                 _SettingsRow(
                   icon: Icons.delete_forever_outlined,
                   iconColor: AppColors.danger,
@@ -456,36 +404,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ],
             ),
           ),
-
           const SizedBox(height: 24),
-
-          // Logout button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: () async {
                 final navigator = Navigator.of(context, rootNavigator: true);
                 await ref.read(sessionProvider.notifier).logout();
-                unawaited(navigator.pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-                  (route) => false,
-                ));
+                unawaited(
+                  navigator.pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                    (route) => false,
+                  ),
+                );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.dangerSoft,
                 foregroundColor: AppColors.danger,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               icon: const Icon(Icons.logout_rounded),
-              label: Text(t.signOut,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 16)),
+              label: Text(
+                t.signOut,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
             ),
           ),
-
           const SizedBox(height: 16),
           Center(
             child: Text(
@@ -504,6 +455,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title});
+
   final String title;
 
   @override
@@ -528,6 +480,7 @@ class _SettingsRow extends StatelessWidget {
     required this.onTap,
     this.trailingText,
   });
+
   final IconData icon;
   final Color iconColor;
   final String title;
@@ -553,43 +506,36 @@ class _SettingsRow extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(title,
-                  style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600)),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
             if (trailingText != null) ...[
               const SizedBox(width: 12),
               Flexible(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          trailingText!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.right,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textSecondaryLight,
-                            fontWeight: FontWeight.w600,
-                            height: 1.0,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Icon(Icons.chevron_right,
-                          color: AppColors.textMuted, size: 22),
-                    ],
+                child: Text(
+                  trailingText!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondaryLight,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
+              const SizedBox(width: 6),
             ],
-            if (trailingText == null)
-              const Icon(Icons.chevron_right,
-                  color: AppColors.textMuted, size: 22),
+            const Icon(
+              Icons.chevron_right,
+              color: AppColors.textMuted,
+              size: 22,
+            ),
           ],
         ),
       ),
@@ -605,6 +551,7 @@ class _SettingsSwitchRow extends StatelessWidget {
     required this.value,
     required this.onChanged,
   });
+
   final IconData icon;
   final Color iconColor;
   final String title;
@@ -628,9 +575,13 @@ class _SettingsSwitchRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(title,
-                style:
-                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           Switch(
             value: value,
