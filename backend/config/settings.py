@@ -88,7 +88,7 @@ AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "accounts.authentication.EditionTokenAuthentication",
+        "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -124,11 +124,6 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# Baby Locator Lite signed access tokens. Paid/legacy tokens remain unchanged.
-# Override this in production if you want Lite token signing isolated from
-# DJANGO_SECRET_KEY; otherwise the Django secret is used.
-LITE_TOKEN_SIGNING_KEY = os.getenv("LITE_TOKEN_SIGNING_KEY", SECRET_KEY)
 
 # Firebase Cloud Messaging
 # Path to the service account JSON file downloaded from Firebase Console.
