@@ -15,6 +15,9 @@ bool canAccessMultipleChildren({
 /// Premium/paywall handling is disabled in the free version of the app.
 bool isPremiumRequiredError(Object error) => false;
 
+/// Legacy helper kept so old UI code cannot re-lock a feature.
+bool isPremiumUser(Object info) => true;
+
 class SubscriptionState {
   const SubscriptionState({
     this.initialized = true,
@@ -41,6 +44,14 @@ class SubscriptionState {
 
   /// Kept for compatibility with legacy callers. Access is always active.
   bool get hasActiveEntitlement => true;
+
+  /// Billing data no longer exists. These compatibility getters stay empty.
+  Object? get customerInfo => null;
+  Object? get offerings => null;
+  Object? get currentOffering => null;
+  Object? get monthlyPackage => null;
+  Object? get yearlyPackage => null;
+  List<Object> get paywallPackages => const [];
 
   SubscriptionState copyWith({
     bool? initialized,
@@ -93,6 +104,14 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
       clearError: true,
     );
   }
+
+  /// Legacy methods are intentionally no-ops so old callers stay safe without
+  /// reintroducing billing SDKs or network calls.
+  Future<Object?> fetchOfferings() async => null;
+  Future<Object?> refreshCustomerInfo() async => null;
+  Future<Object?> restorePurchases() async => null;
+  Future<Object?> purchasePackage(Object package) async => null;
+  Future<void> openCustomerCenter() async {}
 
   void clearError() {
     if (state.errorMessage == null) return;
