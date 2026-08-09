@@ -10,13 +10,6 @@ import '../services/api_client.dart';
 /// Legacy compatibility constant. There is no free-plan limit anymore.
 const int freePlanChildLimit = 1;
 
-/// Build-time key used only by Baby Locator Lite to request a signed Lite token.
-/// Pass it with: --dart-define=LITE_APP_ACCESS_KEY=...
-const String _liteAppAccessKey = String.fromEnvironment(
-  'LITE_APP_ACCESS_KEY',
-  defaultValue: '',
-);
-
 /// Every user can add and manage any number of children from the app UI.
 bool canAccessMultipleChildren({
   required bool isPremium,
@@ -93,9 +86,9 @@ class SubscriptionState {
 
 /// Compatibility provider for screens that used to watch subscription state.
 /// RevenueCat and billing are disabled. When a user session exists, the Lite
-/// app exchanges the normal backend token for a backend-signed Lite token.
-/// That keeps the paid app on its original subscription rules while this app
-/// gets full server-side access without changing user.is_premium in the DB.
+/// app identifies itself once with X-App-Edition: lite and exchanges the normal
+/// backend token for a backend-signed Lite token. The paid app keeps using the
+/// original subscription rules, while this app gets full server-side access.
 class SubscriptionService extends StateNotifier<SubscriptionState> {
   SubscriptionService() : super(const SubscriptionState());
 
@@ -129,8 +122,6 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
 
   Future<void> _ensureLiteAccessToken() async {
     try {
-      if (_liteAppAccessKey.isEmpty) return;
-
       await ApiClient.instance.loadToken();
       final currentToken = ApiClient.instance.token;
       if (currentToken == null || currentToken.isEmpty) return;
@@ -142,7 +133,7 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
         Uri.parse('${ApiClient.instance.baseUrl}/api/revenuecat/lite-token/'),
         headers: {
           'Authorization': 'Token $currentToken',
-          'X-Lite-App-Key': _liteAppAccessKey,
+          'X-App-Edition': 'lite',
           'Content-Type': 'application/json',
         },
       );
