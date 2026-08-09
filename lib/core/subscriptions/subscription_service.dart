@@ -1,24 +1,9 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 
-import '../services/api_client.dart';
 import '../providers/session_providers.dart';
-import 'revenuecat_ui_bridge.dart';
+import '../services/api_client.dart';
 
-const String _revenueCatFallbackApiKey = String.fromEnvironment(
-  'REVENUECAT_API_KEY',
-  defaultValue: 'test_JSSNigqntAdnsSPLrHFggHWpZpm',
-);
-const String _revenueCatAndroidApiKey = String.fromEnvironment(
-  'REVENUECAT_API_KEY_ANDROID',
-);
-const String _revenueCatIosApiKey = String.fromEnvironment(
-  'REVENUECAT_API_KEY_IOS',
-);
 const String revenueCatEntitlementId = 'family_security_pro';
 const String revenueCatDefaultOfferingId = 'default';
 const String revenueCatMonthlyProductId = 'monthly';
@@ -35,6 +20,9 @@ const List<String> revenueCatYearlyProductIds = [
   revenueCatYearlyProductId,
   revenueCatIosYearlyProductId,
 ];
+
+/// Kept only for compatibility with existing UI code.
+/// Access is no longer limited by a free-plan child count.
 const int freePlanChildLimit = 1;
 
 bool matchesRevenueCatProductId(String storeProductId, String configuredId) {
@@ -47,8 +35,7 @@ bool matchesRevenueCatProductId(String storeProductId, String configuredId) {
     return true;
   }
 
-  final storeSegments = normalizedStoreId.split(':');
-  return storeSegments.contains(normalizedConfiguredId);
+  return normalizedStoreId.split(':').contains(normalizedConfiguredId);
 }
 
 bool matchesAnyRevenueCatProductId(
@@ -77,30 +64,15 @@ bool isRevenueCatYearlyProductId(String storeProductId) {
   );
 }
 
-String get revenueCatApiKey {
-  final androidKey = _revenueCatAndroidApiKey.trim();
-  final iosKey = _revenueCatIosApiKey.trim();
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.android:
-      return androidKey.isNotEmpty ? androidKey : _revenueCatFallbackApiKey;
-    case TargetPlatform.iOS:
-    case TargetPlatform.macOS:
-      return iosKey.isNotEmpty ? iosKey : _revenueCatFallbackApiKey;
-    default:
-      return _revenueCatFallbackApiKey;
-  }
-}
-
-bool isPremiumUser(CustomerInfo info) {
-  return info.entitlements.active.containsKey(revenueCatEntitlementId);
-}
+/// The application is fully free now, so any legacy purchase result is treated
+/// as having access. This keeps old compatibility code from re-locking features.
+bool isPremiumUser(CustomerInfo info) => true;
 
 bool canAccessMultipleChildren({
   required bool isPremium,
   required int currentChildrenCount,
-}) {
-  return isPremium || currentChildrenCount < freePlanChildLimit;
-}
+}) =>
+    true;
 
 bool isPremiumRequiredError(Object error) {
   if (error is! ApiException) return false;
@@ -123,7 +95,7 @@ class SubscriptionException implements Exception {
 
 class SubscriptionState {
   const SubscriptionState({
-    this.initialized = false,
+    this.initialized = true,
     this.configured = false,
     this.loadingOfferings = false,
     this.refreshingCustomerInfo = false,
@@ -146,16 +118,10 @@ class SubscriptionState {
   final Offerings? offerings;
   final String? errorMessage;
 
-  bool get isPremium {
-    final info = customerInfo;
-    return info != null && isPremiumUser(info);
-  }
+  /// All users have full access. No entitlement or purchase is required.
+  bool get isPremium => true;
 
-  bool get hasActiveEntitlement =>
-      customerInfo?.entitlements.active.containsKey(
-        revenueCatEntitlementId,
-      ) ??
-      false;
+  bool get hasActiveEntitlement => true;
 
   Offering? get currentOffering =>
       offerings?.getOffering(revenueCatDefaultOfferingId) ?? offerings?.current;
@@ -170,12 +136,12 @@ class SubscriptionState {
 
   List<Package> get paywallPackages {
     final packages = <Package>[];
+
     void addPackage(Package? package) {
       if (package == null) return;
-      if (_isHiddenPaywallPackage(package)) return;
+      if (package.packageType == PackageType.lifetime) return;
       if (packages.any(
-        (item) =>
-            item.storeProduct.identifier == package.storeProduct.identifier,
+        (item) => item.storeProduct.identifier == package.storeProduct.identifier,
       )) {
         return;
       }
@@ -227,7 +193,9 @@ class SubscriptionState {
   }
 
   static Package? _findPackage(
-      Offering? offering, Iterable<String> productIds) {
+    Offering? offering,
+    Iterable<String> productIds,
+  ) {
     if (offering == null) return null;
     for (final package in offering.availablePackages) {
       if (matchesAnyRevenueCatProductId(
@@ -239,179 +207,71 @@ class SubscriptionState {
     }
     return null;
   }
-
-  static bool _isHiddenPaywallPackage(Package package) {
-    return package.packageType == PackageType.lifetime;
-  }
 }
 
 class SubscriptionService extends StateNotifier<SubscriptionState> {
   SubscriptionService() : super(const SubscriptionState());
 
-  bool _customerInfoListenerAttached = false;
-  Future<void>? _configureFuture;
-
   Future<void> bootstrap({SessionUser? user}) async {
-    try {
-      await _configureIfNeeded(user);
-      await Future.wait([
-        fetchOfferings(),
-        refreshCustomerInfo(),
-      ]);
-      state = state.copyWith(initialized: true, clearError: true);
-    } catch (error) {
-      state = state.copyWith(
-        initialized: true,
-        errorMessage: _friendlyErrorMessage(error),
-      );
-      rethrow;
-    }
+    state = state.copyWith(
+      initialized: true,
+      configured: false,
+      appUserId: _normalizeAppUserId(user),
+      clearCustomerInfo: true,
+      clearOfferings: true,
+      clearError: true,
+    );
   }
 
   Future<void> syncSessionUser(SessionUser? user) async {
-    await _configureIfNeeded(user);
-    final nextAppUserId = _normalizeAppUserId(user);
-
-    if (user != null && nextAppUserId == null) {
-      const error = SubscriptionException(
-        message: 'RevenueCat appUserID is invalid for this account.',
-      );
-      state = state.copyWith(errorMessage: error.message);
-      throw error;
-    }
-
-    if (nextAppUserId == null) {
-      await _logOutIfNeeded();
-      return;
-    }
-
-    if (state.appUserId == nextAppUserId) {
-      await refreshCustomerInfo();
-      return;
-    }
-
-    try {
-      final result = await Purchases.logIn(nextAppUserId);
-      _applyCustomerInfo(
-        result.customerInfo,
-        appUserId: nextAppUserId,
-      );
-      state = state.copyWith(clearError: true);
-    } on PlatformException catch (error) {
-      throw _mapRevenueCatError(error);
-    }
+    state = state.copyWith(
+      initialized: true,
+      configured: false,
+      appUserId: _normalizeAppUserId(user),
+      clearAppUserId: user == null,
+      clearCustomerInfo: true,
+      clearOfferings: true,
+      clearError: true,
+    );
   }
 
+  /// Legacy compatibility methods intentionally do not contact RevenueCat.
   Future<Offerings?> fetchOfferings() async {
-    state = state.copyWith(loadingOfferings: true, clearError: true);
-    try {
-      final offerings = await Purchases.getOfferings();
-      final offering = offerings.getOffering(revenueCatDefaultOfferingId) ??
-          offerings.current;
-      if (offering == null || offering.availablePackages.isEmpty) {
-        throw const SubscriptionException(
-          message: 'No active subscription offering is available right now.',
-        );
-      }
-      state = state.copyWith(
-        offerings: offerings,
-        loadingOfferings: false,
-      );
-      return offerings;
-    } catch (error) {
-      state = state.copyWith(
-        loadingOfferings: false,
-        errorMessage: _friendlyErrorMessage(error),
-      );
-      rethrow;
-    }
+    state = state.copyWith(
+      loadingOfferings: false,
+      clearOfferings: true,
+      clearError: true,
+    );
+    return null;
   }
 
   Future<CustomerInfo?> refreshCustomerInfo() async {
-    state = state.copyWith(refreshingCustomerInfo: true, clearError: true);
-    try {
-      final customerInfo = await Purchases.getCustomerInfo();
-      _applyCustomerInfo(customerInfo);
-      state = state.copyWith(refreshingCustomerInfo: false);
-      return customerInfo;
-    } catch (error) {
-      state = state.copyWith(
-        refreshingCustomerInfo: false,
-        errorMessage: _friendlyErrorMessage(error),
-      );
-      rethrow;
-    }
+    state = state.copyWith(
+      refreshingCustomerInfo: false,
+      clearCustomerInfo: true,
+      clearError: true,
+    );
+    return null;
   }
 
   Future<CustomerInfo?> purchasePackage(Package package) async {
-    state = state.copyWith(purchaseInProgress: true, clearError: true);
-    try {
-      final result = await Purchases.purchase(
-        PurchaseParams.package(package),
-      );
-      _applyCustomerInfo(result.customerInfo);
-      state = state.copyWith(purchaseInProgress: false);
-      return result.customerInfo;
-    } on PlatformException catch (error) {
-      final mapped = _mapRevenueCatError(error);
-      state = state.copyWith(
-        purchaseInProgress: false,
-        errorMessage: mapped.message,
-      );
-      throw mapped;
-    } catch (error) {
-      final mapped = SubscriptionException(
-        message: _friendlyErrorMessage(error),
-      );
-      state = state.copyWith(
-        purchaseInProgress: false,
-        errorMessage: mapped.message,
-      );
-      throw mapped;
-    }
+    state = state.copyWith(
+      purchaseInProgress: false,
+      clearError: true,
+    );
+    return null;
   }
 
   Future<CustomerInfo?> restorePurchases() async {
-    state = state.copyWith(restoringPurchases: true, clearError: true);
-    try {
-      final customerInfo = await Purchases.restorePurchases();
-      _applyCustomerInfo(customerInfo);
-      state = state.copyWith(restoringPurchases: false);
-      return customerInfo;
-    } on PlatformException catch (error) {
-      final mapped = _mapRevenueCatError(error);
-      state = state.copyWith(
-        restoringPurchases: false,
-        errorMessage: mapped.message,
-      );
-      throw mapped;
-    } catch (error) {
-      final mapped = SubscriptionException(
-        message: _friendlyErrorMessage(error),
-      );
-      state = state.copyWith(
-        restoringPurchases: false,
-        errorMessage: mapped.message,
-      );
-      throw mapped;
-    }
+    state = state.copyWith(
+      restoringPurchases: false,
+      clearError: true,
+    );
+    return null;
   }
 
   Future<void> openCustomerCenter() async {
-    try {
-      await presentRevenueCatCustomerCenter(
-        onRestoreCompleted: (customerInfo) {
-          _applyCustomerInfo(customerInfo);
-        },
-      );
-      await refreshCustomerInfo();
-    } catch (error) {
-      final mapped = SubscriptionException(
-        message: _friendlyErrorMessage(error),
-      );
-      state = state.copyWith(errorMessage: mapped.message);
-      throw mapped;
-    }
+    // Purchases are disabled: there is no customer center to open.
   }
 
   void clearError() {
@@ -419,150 +279,10 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
     state = state.copyWith(clearError: true);
   }
 
-  Future<void> _configureIfNeeded(SessionUser? user) async {
-    if (state.configured) return;
-    final inFlight = _configureFuture;
-    if (inFlight != null) {
-      await inFlight;
-      return;
-    }
-
-    final future = _configure(user);
-    _configureFuture = future;
-    try {
-      await future;
-    } finally {
-      _configureFuture = null;
-    }
-  }
-
-  Future<void> _configure(SessionUser? user) async {
-    if (revenueCatApiKey.trim().isEmpty) {
-      throw const SubscriptionException(
-        message: 'RevenueCat API key is missing.',
-      );
-    }
-
-    final configuration = PurchasesConfiguration(revenueCatApiKey);
-    final appUserId = _normalizeAppUserId(user);
-    if (appUserId != null) {
-      configuration.appUserID = appUserId;
-    }
-
-    await Purchases.setLogLevel(
-      kReleaseMode ? LogLevel.info : LogLevel.debug,
-    );
-    await Purchases.configure(configuration);
-
-    if (!_customerInfoListenerAttached) {
-      Purchases.addCustomerInfoUpdateListener(_handleCustomerInfoUpdated);
-      _customerInfoListenerAttached = true;
-    }
-
-    state = state.copyWith(
-      configured: true,
-      appUserId: appUserId,
-      clearError: true,
-    );
-  }
-
-  Future<void> _logOutIfNeeded() async {
-    try {
-      final customerInfo = await Purchases.logOut();
-      _applyCustomerInfo(customerInfo, clearAppUserId: true);
-      state = state.copyWith(clearError: true);
-    } on PlatformException catch (error) {
-      final code = PurchasesErrorHelper.getErrorCode(error);
-      if (code == PurchasesErrorCode.logOutWithAnonymousUserError) {
-        state = state.copyWith(
-          clearAppUserId: true,
-          clearCustomerInfo: true,
-          clearError: true,
-        );
-        return;
-      }
-      final mapped = _mapRevenueCatError(error);
-      state = state.copyWith(errorMessage: mapped.message);
-      throw mapped;
-    }
-  }
-
-  void _handleCustomerInfoUpdated(CustomerInfo customerInfo) {
-    _applyCustomerInfo(customerInfo);
-  }
-
-  void _applyCustomerInfo(
-    CustomerInfo customerInfo, {
-    String? appUserId,
-    bool clearAppUserId = false,
-  }) {
-    state = state.copyWith(
-      customerInfo: customerInfo,
-      appUserId: clearAppUserId
-          ? null
-          : appUserId ??
-              _normalizeRevenueCatUserId(customerInfo.originalAppUserId),
-      clearError: true,
-    );
-  }
-
   String? _normalizeAppUserId(SessionUser? user) {
     final id = user?.id;
-    if (id == null || id <= 0) {
-      return null;
-    }
+    if (id == null || id <= 0) return null;
     return '$id';
-  }
-
-  String? _normalizeRevenueCatUserId(String? appUserId) {
-    if (appUserId == null) return state.appUserId;
-    final trimmed = appUserId.trim();
-    if (trimmed.isEmpty || trimmed.startsWith(r'$RCAnonymousID:')) {
-      return null;
-    }
-    return trimmed;
-  }
-
-  SubscriptionException _mapRevenueCatError(PlatformException error) {
-    final code = PurchasesErrorHelper.getErrorCode(error);
-    switch (code) {
-      case PurchasesErrorCode.purchaseCancelledError:
-        return const SubscriptionException(
-          message: 'Purchase was cancelled.',
-          isCancelled: true,
-        );
-      case PurchasesErrorCode.networkError:
-      case PurchasesErrorCode.offlineConnectionError:
-        return const SubscriptionException(
-          message: 'Network error while contacting RevenueCat.',
-        );
-      case PurchasesErrorCode.invalidAppUserIdError:
-        return const SubscriptionException(
-          message: 'RevenueCat appUserID is invalid.',
-        );
-      case PurchasesErrorCode.invalidCredentialsError:
-      case PurchasesErrorCode.configurationError:
-        return const SubscriptionException(
-          message: 'RevenueCat is not configured correctly for this app.',
-        );
-      default:
-        final message = error.message?.trim();
-        return SubscriptionException(
-          message: message == null || message.isEmpty
-              ? 'Subscription request failed.'
-              : message,
-        );
-    }
-  }
-
-  String _friendlyErrorMessage(Object error) {
-    if (error is SubscriptionException) {
-      return error.message;
-    }
-    if (error is PlatformException) {
-      return _mapRevenueCatError(error).message;
-    }
-    return error.toString();
   }
 }
 
