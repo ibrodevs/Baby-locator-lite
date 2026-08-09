@@ -29,8 +29,8 @@ def premium_required_response():
 
 
 def has_premium_access(user, *, child=None):
-    """Lite edition: every authenticated user has full feature access."""
-    return user is not None and getattr(user, "is_authenticated", True)
+    owner = subscription_owner_for(user, child=child)
+    return bool(owner and owner.is_premium)
 
 
 def subscription_owner_for(user, *, child=None):
@@ -44,8 +44,7 @@ def subscription_owner_for(user, *, child=None):
 
 
 def parent_can_add_child(parent):
-    """Lite edition: there is no premium child-count limit."""
-    return True
+    return parent.is_premium or parent.children.count() < 1
 
 
 def webhook_auth_is_valid(header_value):
