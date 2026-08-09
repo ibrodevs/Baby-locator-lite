@@ -86,9 +86,9 @@ class SubscriptionState {
 
 /// Compatibility provider for screens that used to watch subscription state.
 /// RevenueCat and billing are disabled. When a user session exists, the Lite
-/// app exchanges the normal backend token for a backend-signed Lite token.
-/// That keeps the paid app on its original subscription rules while this app
-/// gets full server-side access without changing user.is_premium in the DB.
+/// app identifies itself once with X-App-Edition: lite and exchanges the normal
+/// backend token for a backend-signed Lite token. The paid app keeps using the
+/// original subscription rules, while this app gets full server-side access.
 class SubscriptionService extends StateNotifier<SubscriptionState> {
   SubscriptionService() : super(const SubscriptionState());
 
@@ -133,6 +133,7 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
         Uri.parse('${ApiClient.instance.baseUrl}/api/revenuecat/lite-token/'),
         headers: {
           'Authorization': 'Token $currentToken',
+          'X-App-Edition': 'lite',
           'Content-Type': 'application/json',
         },
       );

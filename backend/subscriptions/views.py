@@ -1,36 +1,10 @@
 import json
 
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.authentication import build_lite_token
-
 from .services import process_revenuecat_event, webhook_auth_is_valid
-
-
-class LiteAccessTokenView(APIView):
-    """Exchange a normal authenticated token for a signed Lite edition token.
-
-    The underlying DRF token and user stay exactly the same. Only the returned
-    credential carries a signed edition marker, so legacy paid clients remain
-    unaffected while Baby Locator Lite can be granted full feature access.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        token_key = getattr(request.auth, "key", "")
-        if not token_key:
-            return Response({"detail": "token authentication required"}, status=400)
-
-        return Response(
-            {
-                "token": build_lite_token(token_key),
-                "edition": "lite",
-            },
-            status=200,
-        )
 
 
 class RevenueCatWebhookView(APIView):
