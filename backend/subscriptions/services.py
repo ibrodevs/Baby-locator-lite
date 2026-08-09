@@ -29,6 +29,12 @@ def premium_required_response():
 
 
 def has_premium_access(user, *, child=None):
+    # Baby Locator Lite gets full access only when the current request was
+    # authenticated with a valid backend-signed Lite token. Legacy/paid
+    # clients do not have this transient flag and keep the original logic.
+    if getattr(user, "_lite_full_access", False):
+        return True
+
     owner = subscription_owner_for(user, child=child)
     return bool(owner and owner.is_premium)
 
@@ -44,6 +50,8 @@ def subscription_owner_for(user, *, child=None):
 
 
 def parent_can_add_child(parent):
+    if getattr(parent, "_lite_full_access", False):
+        return True
     return parent.is_premium or parent.children.count() < 1
 
 

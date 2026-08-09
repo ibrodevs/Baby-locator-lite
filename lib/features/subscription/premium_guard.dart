@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/subscriptions/subscription_service.dart';
 import '../../l10n/app_localizations.dart';
-import 'premium_onboarding_screen.dart';
 
+/// Legacy feature identifiers kept so existing screens do not need invasive
+/// changes. The app is fully free, therefore every feature is always allowed.
 enum PremiumFeature {
   additionalChildren,
   liveMap,
@@ -18,6 +17,8 @@ enum PremiumFeature {
   generic,
 }
 
+/// Legacy copy helpers are retained for compatibility with any existing UI,
+/// even though these features are no longer gated by a subscription.
 extension PremiumFeatureCopy on PremiumFeature {
   String titleFor(BuildContext context) {
     final t = S.of(context);
@@ -56,38 +57,12 @@ Future<bool> requirePremium(
   BuildContext context, {
   PremiumFeature feature = PremiumFeature.generic,
 }) async {
-  final container = ProviderScope.containerOf(context, listen: false);
-  final state = container.read(subscriptionServiceProvider);
-  if (state.isPremium) return true;
-
-  final result = await Navigator.of(context).push<bool>(
-    MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => PremiumOnboardingScreen(feature: feature),
-    ),
-  );
-
-  if (result == true) {
-    return true;
-  }
-
-  return container.read(subscriptionServiceProvider).isPremium;
+  return true;
 }
 
 Future<bool> requirePremiumForAdditionalChild(
   BuildContext context, {
   required int currentChildrenCount,
 }) async {
-  final container = ProviderScope.containerOf(context, listen: false);
-  final state = container.read(subscriptionServiceProvider);
-  if (canAccessMultipleChildren(
-    isPremium: state.isPremium,
-    currentChildrenCount: currentChildrenCount,
-  )) {
-    return true;
-  }
-  return requirePremium(
-    context,
-    feature: PremiumFeature.additionalChildren,
-  );
+  return true;
 }
