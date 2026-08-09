@@ -10,6 +10,13 @@ import '../services/api_client.dart';
 /// Legacy compatibility constant. There is no free-plan limit anymore.
 const int freePlanChildLimit = 1;
 
+/// Build-time key used only by Baby Locator Lite to request a signed Lite token.
+/// Pass it with: --dart-define=LITE_APP_ACCESS_KEY=...
+const String _liteAppAccessKey = String.fromEnvironment(
+  'LITE_APP_ACCESS_KEY',
+  defaultValue: '',
+);
+
 /// Every user can add and manage any number of children from the app UI.
 bool canAccessMultipleChildren({
   required bool isPremium,
@@ -122,6 +129,8 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
 
   Future<void> _ensureLiteAccessToken() async {
     try {
+      if (_liteAppAccessKey.isEmpty) return;
+
       await ApiClient.instance.loadToken();
       final currentToken = ApiClient.instance.token;
       if (currentToken == null || currentToken.isEmpty) return;
@@ -133,6 +142,7 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
         Uri.parse('${ApiClient.instance.baseUrl}/api/revenuecat/lite-token/'),
         headers: {
           'Authorization': 'Token $currentToken',
+          'X-Lite-App-Key': _liteAppAccessKey,
           'Content-Type': 'application/json',
         },
       );
