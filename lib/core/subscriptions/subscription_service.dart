@@ -1,6 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../providers/session_providers.dart';
+import '../services/api_client.dart';
 
 /// Legacy compatibility constant. There is no free-plan limit anymore.
 const int freePlanChildLimit = 1;
@@ -80,8 +85,10 @@ class SubscriptionState {
 }
 
 /// Compatibility provider for screens that used to watch subscription state.
-/// It no longer initializes RevenueCat, fetches offerings, restores purchases,
-/// or performs any billing-related network/platform calls.
+/// RevenueCat and billing are disabled. When a user session exists, the Lite
+/// app exchanges the normal backend token for a backend-signed Lite token.
+/// That keeps the paid app on its original subscription rules while this app
+/// gets full server-side access without changing user.is_premium in the DB.
 class SubscriptionService extends StateNotifier<SubscriptionState> {
   SubscriptionService() : super(const SubscriptionState());
 
@@ -93,6 +100,10 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
       clearAppUserId: user == null,
       clearError: true,
     );
+
+    if (user != null) {
+      await _ensureLiteAccessToken();
+    }
   }
 
   Future<void> syncSessionUser(SessionUser? user) async {
@@ -103,10 +114,48 @@ class SubscriptionService extends StateNotifier<SubscriptionState> {
       clearAppUserId: user == null,
       clearError: true,
     );
+
+    if (user != null) {
+      await _ensureLiteAccessToken();
+    }
+  }
+
+  Future<void> _ensureLiteAccessToken() async {
+    try {
+      await ApiClient.instance.loadToken();
+      final currentToken = ApiClient.instance.token;
+      if (currentToken == null || currentToken.isEmpty) return;
+
+      // Already exchanged for this Lite installation/session.
+      if (currentToken.startsWith('lite.')) return;
+
+      final response = await http.post(
+        Uri.parse('${ApiClient.instance.baseUrl}/api/revenuecat/lite-token/'),
+        headers: {
+          'Authorization': 'Token $currentToken',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) return;
+      if (response.body.isEmpty) return;
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return;
+      final liteToken = decoded['token']?.toString().trim();
+      if (liteToken == null || !liteToken.startsWith('lite.')) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', liteToken);
+      await ApiClient.instance.loadToken();
+    } catch (_) {
+      // Keep startup/login resilient. If the backend has not been deployed yet,
+      // the app still opens and will retry on the next session sync/startup.
+    }
   }
 
   /// Legacy methods are intentionally no-ops so old callers stay safe without
-  /// reintroducing billing SDKs or network calls.
+  /// reintroducing billing SDKs or network purchase calls.
   Future<Object?> fetchOfferings() async => null;
   Future<Object?> refreshCustomerInfo() async => null;
   Future<Object?> restorePurchases() async => null;
