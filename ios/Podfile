@@ -4,6 +4,8 @@ platform :ios, '14.0'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+require 'xcodeproj'
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
@@ -26,6 +28,64 @@ end
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
 
 flutter_ios_podfile_setup
+
+def firebase_ios_bundle_id
+  plist_path = File.expand_path('Runner/GoogleService-Info.plist', __dir__)
+  return nil unless File.exist?(plist_path)
+
+  firebase_config = Xcodeproj::Plist.read_from_path(plist_path)
+  bundle_id = firebase_config['BUNDLE_ID'].to_s.strip
+  bundle_id.empty? ? nil : bundle_id
+rescue StandardError => error
+  Pod::UI.warn("Unable to read Firebase iOS bundle id: #{error.message}")
+  nil
+end
+
+def sync_runner_project_settings
+  bundle_id = firebase_ios_bundle_id
+  unless bundle_id
+    Pod::UI.warn('GoogleService-Info.plist has no BUNDLE_ID; keeping the existing Xcode bundle identifier.')
+    return
+  end
+
+  project_path = File.expand_path('Runner.xcodeproj', __dir__)
+  project = Xcodeproj::Project.open(project_path)
+  changed = false
+
+  project.targets.each do |target|
+    next unless ['Runner', 'RunnerTests'].include?(target.name)
+
+    target.build_configurations.each do |config|
+      expected_bundle_id = target.name == 'Runner' ? bundle_id : "#{bundle_id}.RunnerTests"
+      settings = config.build_settings
+
+      if settings['PRODUCT_BUNDLE_IDENTIFIER'] != expected_bundle_id
+        settings['PRODUCT_BUNDLE_IDENTIFIER'] = expected_bundle_id
+        changed = true
+      end
+
+      if settings.key?('DEVELOPMENT_TEAM')
+        settings.delete('DEVELOPMENT_TEAM')
+        changed = true
+      end
+
+      unless settings['CODE_SIGN_STYLE'] == 'Automatic'
+        settings['CODE_SIGN_STYLE'] = 'Automatic'
+        changed = true
+      end
+
+      unless settings['IPHONEOS_DEPLOYMENT_TARGET'] == '14.0'
+        settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
+        changed = true
+      end
+    end
+  end
+
+  if changed
+    project.save
+    Pod::UI.puts "Synced Runner bundle identifier with Firebase: #{bundle_id}"
+  end
+end
 
 def patch_flutter_webrtc_event_sink
   plugin_file = File.expand_path(
@@ -81,14 +141,19 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
-      # Отключаем песочницу, чтобы скрипты могли копировать файлы фреймворков
+      # Disable sandbox so framework copy scripts can run under Xcode.
       config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
-      # Принудительно 14.0 для совместимости с Google Maps
+      # Keep all pods aligned with the application deployment target.
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '14.0'
-      # Отключаем Bitcode
+      # Bitcode is no longer used by modern iOS toolchains.
       config.build_settings['ENABLE_BITCODE'] = 'NO'
-      # Явные Swift-модули ломают импорт Firebase/FirebaseCore на части конфигураций Xcode/CocoaPods
+      # Explicit Swift modules can break Firebase imports with some CocoaPods/Xcode combinations.
       config.build_settings['SWIFT_ENABLE_EXPLICIT_MODULES'] = 'NO'
     end
   end
+
+  # Keep the native Runner project consistent with the Firebase iOS app and
+  # portable between developer machines. The client only needs to select their
+  # own Apple Development Team in Xcode after running `pod install`.
+  sync_runner_project_settings
 end
